@@ -38,10 +38,10 @@ func (s *Semaphore) Acquire(n int64) {
 		if atomic.CompareAndSwapInt64(&s.turn, 0, 1) {
 			if s.AvailablePermits() >= n {
 				atomic.AddInt64(&s.permits, -n)
-				atomic.SwapInt64(&s.turn, 0)
+				atomic.StoreInt64(&s.turn, 0)
 				return
 			}
-			atomic.SwapInt64(&s.turn, 0)
+			atomic.StoreInt64(&s.turn, 0)
 		}
 		runtime.Gosched()
 	}
@@ -97,7 +97,7 @@ func (s *Semaphore) TryAcquire(n int64) error {
 	}
 	for {
 		if atomic.CompareAndSwapInt64(&s.turn, 0, 1) {
-			defer atomic.SwapInt64(&s.turn, 0)
+			defer atomic.StoreInt64(&s.turn, 0)
 			if s.AvailablePermits() >= n {
 				atomic.AddInt64(&s.permits, -n)
 				return nil
