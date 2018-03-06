@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/vasilmkd/semaphore.svg?branch=master)](https://travis-ci.org/vasilmkd/semaphore)
 # [semaphore](https://godoc.org/github.com/vasilmkd/semaphore)
 Go language implementation of a lockless counting semaphore which maintains a
 set of permits.
