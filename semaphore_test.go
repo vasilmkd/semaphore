@@ -15,8 +15,6 @@ const (
 )
 
 func TestAcquireStress(t *testing.T) {
-	t.Parallel()
-
 	n := runtime.GOMAXPROCS(0)
 	times := 10000 / n
 	s := New(int64(n))
@@ -36,8 +34,6 @@ func TestAcquireStress(t *testing.T) {
 }
 
 func TestAcquirePanic(t *testing.T) {
-	t.Parallel()
-
 	defer func() {
 		if recover() == nil {
 			t.Fatal("acquire negative number of permits did not panic")
@@ -49,8 +45,6 @@ func TestAcquirePanic(t *testing.T) {
 }
 
 func TestDrainPermitsStress(t *testing.T) {
-	t.Parallel()
-
 	n := runtime.GOMAXPROCS(0)
 	times := 10000 / n
 	s := New(int64(n))
@@ -70,8 +64,6 @@ func TestDrainPermitsStress(t *testing.T) {
 }
 
 func TestReducePermits(t *testing.T) {
-	t.Parallel()
-
 	for _, c := range []struct {
 		s        *Semaphore
 		by, want int64
@@ -115,8 +107,6 @@ func TestReducePermits(t *testing.T) {
 }
 
 func TestReducePermitsPanic(t *testing.T) {
-	t.Parallel()
-
 	defer func() {
 		if recover() == nil {
 			t.Fatal("reduce permits by a negative number did not panic")
@@ -128,8 +118,6 @@ func TestReducePermitsPanic(t *testing.T) {
 }
 
 func TestRelease(t *testing.T) {
-	t.Parallel()
-
 	for _, c := range []struct {
 		s         *Semaphore
 		rel, want int64
@@ -173,8 +161,6 @@ func TestRelease(t *testing.T) {
 }
 
 func TestReleasePanic(t *testing.T) {
-	t.Parallel()
-
 	defer func() {
 		if recover() == nil {
 			t.Fatal("release negative number of permits did not panic")
@@ -186,8 +172,6 @@ func TestReleasePanic(t *testing.T) {
 }
 
 func TestTryAcquire(t *testing.T) {
-	t.Parallel()
-
 	s := New(2) // Semaphore with 2 permits.
 
 	tryAcquire := func(n int64) bool {
@@ -218,8 +202,6 @@ func TestTryAcquire(t *testing.T) {
 }
 
 func TestTryAcquireStress(t *testing.T) {
-	t.Parallel()
-
 	n := runtime.GOMAXPROCS(0)
 	times := 10000 / n
 	s := New(int64(n))
@@ -240,8 +222,6 @@ func TestTryAcquireStress(t *testing.T) {
 }
 
 func TestTryAcquirePanic(t *testing.T) {
-	t.Parallel()
-
 	defer func() {
 		if recover() == nil {
 			t.Fatal("acquire negative number of permits did not panic")
@@ -253,8 +233,6 @@ func TestTryAcquirePanic(t *testing.T) {
 }
 
 func TestTryAcquireWithTimeout(t *testing.T) {
-	t.Parallel()
-
 	s := New(2) // Semaphore with 2 permits.
 
 	tryAcquireWithTimeout := func(n int64) bool {
@@ -285,8 +263,6 @@ func TestTryAcquireWithTimeout(t *testing.T) {
 }
 
 func TestTryAcquireWithTimeoutPanic(t *testing.T) {
-	t.Parallel()
-
 	defer func() {
 		if recover() == nil {
 			t.Fatal("acquire negative number of permits did not panic")
@@ -298,8 +274,6 @@ func TestTryAcquireWithTimeoutPanic(t *testing.T) {
 }
 
 func TestLargeAcquireDoesNotStarve(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	n := runtime.GOMAXPROCS(0)
 	s := New(int64(n))
