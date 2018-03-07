@@ -17,37 +17,26 @@ const (
 func TestAcquireStress(t *testing.T) {
 	n := runtime.GOMAXPROCS(0)
 	times := 10000 / n
-	s := New(int64(n))
+	s := New(uint64(n))
 	var wg sync.WaitGroup
 	wg.Add(n)
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < times; j++ {
-				s.Acquire(int64(n))
+				s.Acquire(uint64(n))
 				sleep()
-				s.Release(int64(n))
+				s.Release(uint64(n))
 			}
 		}()
 	}
 	wg.Wait()
 }
 
-func TestAcquirePanic(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("acquire negative number of permits did not panic")
-		}
-	}()
-
-	s := New(1)
-	s.Acquire(-1)
-}
-
 func TestDrainPermitsStress(t *testing.T) {
 	n := runtime.GOMAXPROCS(0)
 	times := 10000 / n
-	s := New(int64(n))
+	s := New(uint64(n))
 	var wg sync.WaitGroup
 	wg.Add(n)
 	for i := 0; i < n; i++ {
@@ -63,64 +52,10 @@ func TestDrainPermitsStress(t *testing.T) {
 	wg.Wait()
 }
 
-func TestReducePermits(t *testing.T) {
-	for _, c := range []struct {
-		s        *Semaphore
-		by, want int64
-	}{
-		{
-			s:    New(10),
-			by:   5,
-			want: 5,
-		},
-		{
-			s:    New(0),
-			by:   1,
-			want: 0,
-		},
-		{
-			s:    New(0),
-			by:   0,
-			want: 0,
-		},
-		{
-			s:    New(-5),
-			by:   8,
-			want: 0,
-		},
-		{
-			s:    New(-5),
-			by:   5,
-			want: 0,
-		},
-		{
-			s:    New(-5),
-			by:   2,
-			want: 0,
-		},
-	} {
-		c.s.ReducePermits(c.by)
-		if got := c.s.AvailablePermits(); got != c.want {
-			t.Errorf("Release(%d) = %d, want %d", c.by, got, c.want)
-		}
-	}
-}
-
-func TestReducePermitsPanic(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("reduce permits by a negative number did not panic")
-		}
-	}()
-
-	s := New(1)
-	s.ReducePermits(-1)
-}
-
 func TestRelease(t *testing.T) {
 	for _, c := range []struct {
 		s         *Semaphore
-		rel, want int64
+		rel, want uint64
 	}{
 		{
 			s:    New(10),
@@ -137,21 +72,6 @@ func TestRelease(t *testing.T) {
 			rel:  0,
 			want: 0,
 		},
-		{
-			s:    New(-5),
-			rel:  8,
-			want: 3,
-		},
-		{
-			s:    New(-5),
-			rel:  5,
-			want: 0,
-		},
-		{
-			s:    New(-5),
-			rel:  2,
-			want: 0,
-		},
 	} {
 		c.s.Release(c.rel)
 		if got := c.s.AvailablePermits(); got != c.want {
@@ -160,21 +80,10 @@ func TestRelease(t *testing.T) {
 	}
 }
 
-func TestReleasePanic(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("release negative number of permits did not panic")
-		}
-	}()
-
-	s := New(1)
-	s.Release(-1)
-}
-
 func TestTryAcquire(t *testing.T) {
 	s := New(2) // Semaphore with 2 permits.
 
-	tryAcquire := func(n int64) bool {
+	tryAcquire := func(n uint64) bool {
 		return s.TryAcquire(n) == nil
 	}
 
@@ -204,16 +113,16 @@ func TestTryAcquire(t *testing.T) {
 func TestTryAcquireStress(t *testing.T) {
 	n := runtime.GOMAXPROCS(0)
 	times := 10000 / n
-	s := New(int64(n))
+	s := New(uint64(n))
 	var wg sync.WaitGroup
 	wg.Add(n)
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < times; j++ {
-				if err := s.TryAcquire(int64(n)); err == nil {
+				if err := s.TryAcquire(uint64(n)); err == nil {
 					sleep()
-					s.Release(int64(n))
+					s.Release(uint64(n))
 				}
 			}
 		}()
@@ -221,21 +130,10 @@ func TestTryAcquireStress(t *testing.T) {
 	wg.Wait()
 }
 
-func TestTryAcquirePanic(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("acquire negative number of permits did not panic")
-		}
-	}()
-
-	s := New(1)
-	s.TryAcquire(-1)
-}
-
 func TestTryAcquireWithTimeout(t *testing.T) {
 	s := New(2) // Semaphore with 2 permits.
 
-	tryAcquireWithTimeout := func(n int64) bool {
+	tryAcquireWithTimeout := func(n uint64) bool {
 		return s.TryAcquireWithTimeout(n, 10*time.Millisecond) == nil
 	}
 
@@ -262,21 +160,10 @@ func TestTryAcquireWithTimeout(t *testing.T) {
 	}
 }
 
-func TestTryAcquireWithTimeoutPanic(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("acquire negative number of permits did not panic")
-		}
-	}()
-
-	s := New(1)
-	s.TryAcquireWithTimeout(-1, 1*time.Millisecond)
-}
-
 func TestLargeAcquireDoesNotStarve(t *testing.T) {
 	ctx := context.Background()
 	n := runtime.GOMAXPROCS(0)
-	s := New(int64(n))
+	s := New(uint64(n))
 	running := true
 
 	var wg sync.WaitGroup
@@ -296,9 +183,9 @@ func TestLargeAcquireDoesNotStarve(t *testing.T) {
 		}()
 	}
 
-	s.TryAcquireWithContext(ctx, int64(n))
+	s.TryAcquireWithContext(ctx, uint64(n))
 	running = false
-	s.Release(int64(n))
+	s.Release(uint64(n))
 	wg.Wait()
 }
 

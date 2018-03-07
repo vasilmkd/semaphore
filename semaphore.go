@@ -20,28 +20,25 @@ import (
 // Semaphores are often used to restrict the number of threads that can access
 // some resource.
 type Semaphore struct {
-	permits, turn int64
+	permits, turn uint64
 }
 
 // New creates a Semaphore with the given number of permits.
-func New(permits int64) *Semaphore {
+func New(permits uint64) *Semaphore {
 	return &Semaphore{permits: permits}
 }
 
 // Acquire acquires the given number of permits from this semaphore, blocking
 // the current goroutine until all are available.
-func (s *Semaphore) Acquire(n int64) {
-	if n < 0 {
-		panic("cannot acquire a negative number of permits")
-	}
+func (s *Semaphore) Acquire(n uint64) {
 	for {
-		if atomic.CompareAndSwapInt64(&s.turn, 0, 1) {
+		if atomic.CompareAndSwapUint64(&s.turn, 0, 1) {
 			if s.AvailablePermits() >= n {
-				atomic.AddInt64(&s.permits, -n)
-				atomic.StoreInt64(&s.turn, 0)
+				atomic.AddUint64(&s.permits, ^uint64(n-1))
+				atomic.StoreUint64(&s.turn, 0)
 				return
 			}
-			atomic.StoreInt64(&s.turn, 0)
+			atomic.StoreUint64(&s.turn, 0)
 		}
 		runtime.Gosched()
 	}
@@ -49,41 +46,25 @@ func (s *Semaphore) Acquire(n int64) {
 
 // AvailablePermits returns the current number of permits available in this
 // semaphore. This method is typically used for debugging and testing purposes.
-func (s *Semaphore) AvailablePermits() int64 {
-	if n := atomic.LoadInt64(&s.permits); n > 0 {
-		return n
-	}
-	return 0
+func (s *Semaphore) AvailablePermits() uint64 {
+	return atomic.LoadUint64(&s.permits)
 }
 
 // DrainPermits acquires and returns all permits that are immediately available.
-func (s *Semaphore) DrainPermits() int64 {
+func (s *Semaphore) DrainPermits() uint64 {
 	for {
 		n := s.AvailablePermits()
-		if n == 0 || atomic.CompareAndSwapInt64(&s.permits, n, 0) {
+		if n == 0 || atomic.CompareAndSwapUint64(&s.permits, n, 0) {
 			return n
 		}
 		runtime.Gosched()
 	}
 }
 
-// ReducePermits shrinks the number of available permits by the indicated
-// reduction. This method differs from Acquire in that it does not block
-// waiting for permits to become available.
-func (s *Semaphore) ReducePermits(by int64) {
-	if by < 0 {
-		panic("cannot reduce the number of permits by a negative number")
-	}
-	atomic.AddInt64(&s.permits, -by)
-}
-
 // Release releases the given number of permits, returning them to the
 // semaphore.
-func (s *Semaphore) Release(n int64) {
-	if n < 0 {
-		panic("cannot release a negative number of permits")
-	}
-	atomic.AddInt64(&s.permits, n)
+func (s *Semaphore) Release(n uint64) {
+	atomic.AddUint64(&s.permits, n)
 }
 
 // TryAcquire acquires the given number of permits from this semaphore, only
@@ -91,15 +72,12 @@ func (s *Semaphore) Release(n int64) {
 // number of available permits by the given number and returns nil, representing
 // success. Otherwise, the number of available permits stays unchanged and an
 // error is returned.
-func (s *Semaphore) TryAcquire(n int64) error {
-	if n < 0 {
-		panic("cannot acquire a negative number of permits")
-	}
+func (s *Semaphore) TryAcquire(n uint64) error {
 	for {
-		if atomic.CompareAndSwapInt64(&s.turn, 0, 1) {
-			defer atomic.StoreInt64(&s.turn, 0)
+		if atomic.CompareAndSwapUint64(&s.turn, 0, 1) {
+			defer atomic.StoreUint64(&s.turn, 0)
 			if s.AvailablePermits() >= n {
-				atomic.AddInt64(&s.permits, -n)
+				atomic.AddUint64(&s.permits, ^uint64(n-1))
 				return nil
 			}
 			return errors.New("not enough available permits")
@@ -113,10 +91,7 @@ func (s *Semaphore) TryAcquire(n int64) error {
 // reduces the number of available permits by the given number and returns nil,
 // representing success. Otherwise, the number of available permits stays
 // unchanged and an error is returned.
-func (s *Semaphore) TryAcquireWithContext(ctx context.Context, n int64) error {
-	if n < 0 {
-		panic("cannot acquire a negative number of permits")
-	}
+func (s *Semaphore) TryAcquireWithContext(ctx context.Context, n uint64) error {
 	success := make(chan struct{}, 1)
 	signal := make(chan bool, 1)
 
@@ -143,7 +118,7 @@ func (s *Semaphore) TryAcquireWithContext(ctx context.Context, n int64) error {
 // successful, reduces the number of available permits by the given number and
 // returns nil, representing success. Otherwise, the number of available permits
 // stays unchanged and an error is returned.
-func (s *Semaphore) TryAcquireWithTimeout(n int64, t time.Duration) error {
+func (s *Semaphore) TryAcquireWithTimeout(n uint64, t time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), t)
 	defer cancel()
 	return s.TryAcquireWithContext(ctx, n)
