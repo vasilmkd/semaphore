@@ -141,6 +141,7 @@ func (s *Semaphore) serveTry(tr tryReq) {
 // Serve a query for the available permits in the semaphore.
 func (s *Semaphore) serveAvailable(ar drainReq) {
 	ar.notify <- s.permits
+	close(ar.notify)
 }
 
 // Acquire acquires the given number of permits from this semaphore, blocking
