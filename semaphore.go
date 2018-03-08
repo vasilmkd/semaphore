@@ -26,12 +26,13 @@ import (
 // other goroutines by acquiring n permits, each of which needs to release a
 // single permit).
 type Semaphore struct {
-	permits          uint64
-	acq              chan req
-	rel              chan uint64
-	available, drain chan drainReq
-	try              chan tryReq
-	queue            list.List
+	permits   uint64
+	acq       chan req
+	rel       chan uint64
+	drain     chan drainReq
+	try       chan tryReq
+	available chan availableReq
+	queue     list.List
 }
 
 // Request for permits.
@@ -51,15 +52,18 @@ type tryReq struct {
 	notify chan error
 }
 
+// A query for the number of available permits in the semaphore.
+type availableReq drainReq
+
 // New creates a Semaphore with the given initial number of permits.
 func New(permits uint64) *Semaphore {
 	s := &Semaphore{
 		permits:   permits,
 		acq:       make(chan req),
 		rel:       make(chan uint64),
-		available: make(chan drainReq),
 		drain:     make(chan drainReq),
 		try:       make(chan tryReq),
+		available: make(chan availableReq),
 	}
 	go s.serve()
 	return s
@@ -139,7 +143,7 @@ func (s *Semaphore) serveTry(tr tryReq) {
 }
 
 // Serve a query for the available permits in the semaphore.
-func (s *Semaphore) serveAvailable(ar drainReq) {
+func (s *Semaphore) serveAvailable(ar availableReq) {
 	ar.notify <- s.permits
 	close(ar.notify)
 }
@@ -158,7 +162,7 @@ func (s *Semaphore) Acquire(n uint64) {
 // AvailablePermits returns the current number of permits available in this
 // semaphore. This method is typically used for debugging and testing purposes.
 func (s *Semaphore) AvailablePermits() uint64 {
-	ar := drainReq{notify: make(chan uint64)}
+	ar := availableReq{notify: make(chan uint64)}
 	s.available <- ar
 	return <-ar.notify
 }
