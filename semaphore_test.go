@@ -75,7 +75,8 @@ func TestRelease(t *testing.T) {
 	} {
 		c.s.Release(c.rel)
 		if got := c.s.AvailablePermits(); got != c.want {
-			t.Errorf("Release(%d) = %d, want %d", c.rel, got, c.want)
+			t.Errorf("semaphore{permits: %d}.Release(%d) = %d, want %d",
+				got, c.rel, got, c.want)
 		}
 	}
 }

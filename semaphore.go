@@ -3,68 +3,168 @@
 package semaphore
 
 import (
+	"container/list"
 	"context"
 	"errors"
-	"runtime"
-	"sync/atomic"
 	"time"
 )
 
 // Semaphore is a lockless counting semaphore. It maintains a set of permits.
-// Each Acquire() call spins in a tight loop which yields the CPU time of the
-// goroutine until a permit is available, and then takes it.
-// Each Release() call adds a permit, potentially releasing a spinning acquirer.
 // No actual permit objects are used. The Semaphore just keeps a count of the
-// available permits.
+// available permits. Semaphores are often used to restrict the number of
+// threads that can access some resource.
 //
-// Semaphores are often used to restrict the number of threads that can access
-// some resource.
+// The semaphore is completely fair, acquire requests are served in a FIFO
+// manner. There is no hard limit on the number of permits that the semaphore
+// maintains, i.e. more permits can be released, even if all of the initial
+// permits are available. Some care should be taken, as to not try to acquire
+// a number of permits which cannot be satisfied with calls to Release(), which
+// might lead to starvation of later, smaller Acquire() calls. On the other
+// hand, this gives more flexibility for different use cases, e.g. a semaphore
+// with 0 initial permits is akin to an already locked mutex (which first needs
+// to be released), or similar to sync.WaitGroup (a goroutine can wait on n
+// other goroutines by acquiring n permits, each of which needs to release a
+// single permit).
 type Semaphore struct {
-	permits, turn uint64
+	permits          uint64
+	acq              chan req
+	rel              chan uint64
+	available, drain chan drainReq
+	try              chan tryReq
+	queue            list.List
 }
 
-// New creates a Semaphore with the given number of permits.
+// Request for permits.
+type req struct {
+	n      uint64        // Number of permits requested.
+	notify chan struct{} // Get notified when enough permits are available.
+}
+
+// Request to drain the semaphore.
+type drainReq struct {
+	notify chan uint64 // How many permits were acquired.
+}
+
+// Non blocking acquire request.
+type tryReq struct {
+	n      uint64
+	notify chan error
+}
+
+// New creates a Semaphore with the given initial number of permits.
 func New(permits uint64) *Semaphore {
-	return &Semaphore{permits: permits}
+	s := &Semaphore{
+		permits:   permits,
+		acq:       make(chan req),
+		rel:       make(chan uint64),
+		available: make(chan drainReq),
+		drain:     make(chan drainReq),
+		try:       make(chan tryReq),
+	}
+	go s.serve()
+	return s
+}
+
+func (s *Semaphore) serve() {
+	for {
+		select {
+		case r := <-s.acq:
+			s.serveAcquire(r)
+		case n := <-s.rel:
+			s.serveRelease(n)
+		case dr := <-s.drain:
+			s.serveDrain(dr)
+		case tr := <-s.try:
+			s.serveTry(tr)
+		case ar := <-s.available:
+			s.serveAvailable(ar)
+		}
+	}
+}
+
+func (s *Semaphore) serveAcquire(r req) {
+	if s.permits >= r.n && s.queue.Len() == 0 {
+		// Acquire can be immediately served.
+		s.permits -= r.n
+		close(r.notify)
+	} else {
+		// Acquire is blocked and queued, not enough available permits.
+		s.queue.PushBack(r)
+	}
+}
+
+func (s *Semaphore) serveRelease(n uint64) {
+	s.permits += n // Permits are released immediately.
+	// Proceed to unblock the next queued requests which can be
+	// fulfilled.
+	for s.queue.Len() > 0 {
+		h := s.queue.Front() // Get the next queued acquire req.
+		r := h.Value.(req)
+		if s.permits < r.n {
+			// The next req cannot be fulfilled. Must stop here,
+			// otherwise we risk starving requests for many permits
+			// at once.
+			break
+		}
+		// Acquire the permits.
+		s.permits -= r.n
+		s.queue.Remove(h) // Remove the req from the queue.
+		close(r.notify)   // Notify the requester.
+	}
+}
+
+func (s *Semaphore) serveDrain(dr drainReq) {
+	dr.notify <- s.permits
+	s.permits = 0
+	close(dr.notify)
+}
+
+func (s *Semaphore) serveTry(tr tryReq) {
+	if s.permits >= tr.n && s.queue.Len() == 0 {
+		// Successful TryAcquire.
+		s.permits -= tr.n
+		tr.notify <- nil
+	} else {
+		tr.notify <- errors.New("not enough available permits")
+	}
+	close(tr.notify)
+}
+
+func (s *Semaphore) serveAvailable(ar drainReq) {
+	ar.notify <- s.permits
 }
 
 // Acquire acquires the given number of permits from this semaphore, blocking
 // the current goroutine until all are available.
 func (s *Semaphore) Acquire(n uint64) {
-	for {
-		if atomic.CompareAndSwapUint64(&s.turn, 0, 1) {
-			if s.AvailablePermits() >= n {
-				atomic.AddUint64(&s.permits, ^uint64(n-1))
-				atomic.StoreUint64(&s.turn, 0)
-				return
-			}
-			atomic.StoreUint64(&s.turn, 0)
-		}
-		runtime.Gosched()
+	r := req{
+		n:      n,
+		notify: make(chan struct{}),
 	}
+	s.acq <- r
+	<-r.notify
 }
 
 // AvailablePermits returns the current number of permits available in this
 // semaphore. This method is typically used for debugging and testing purposes.
 func (s *Semaphore) AvailablePermits() uint64 {
-	return atomic.LoadUint64(&s.permits)
+	ar := drainReq{notify: make(chan uint64)}
+	s.available <- ar
+	return <-ar.notify
 }
 
-// DrainPermits acquires and returns all permits that are immediately available.
+// DrainPermits acquires all permits that are immediately available and returns
+// the number of acquired permits.
 func (s *Semaphore) DrainPermits() uint64 {
-	for {
-		n := s.AvailablePermits()
-		if n == 0 || atomic.CompareAndSwapUint64(&s.permits, n, 0) {
-			return n
-		}
-		runtime.Gosched()
-	}
+	dr := drainReq{notify: make(chan uint64)}
+	s.drain <- dr
+	return <-dr.notify
 }
 
 // Release releases the given number of permits, returning them to the
 // semaphore.
 func (s *Semaphore) Release(n uint64) {
-	atomic.AddUint64(&s.permits, n)
+	s.rel <- n
 }
 
 // TryAcquire acquires the given number of permits from this semaphore, only
@@ -73,17 +173,12 @@ func (s *Semaphore) Release(n uint64) {
 // success. Otherwise, the number of available permits stays unchanged and an
 // error is returned.
 func (s *Semaphore) TryAcquire(n uint64) error {
-	for {
-		if atomic.CompareAndSwapUint64(&s.turn, 0, 1) {
-			defer atomic.StoreUint64(&s.turn, 0)
-			if s.AvailablePermits() >= n {
-				atomic.AddUint64(&s.permits, ^uint64(n-1))
-				return nil
-			}
-			return errors.New("not enough available permits")
-		}
-		runtime.Gosched()
+	tr := tryReq{
+		n:      n,
+		notify: make(chan error),
 	}
+	s.try <- tr
+	return <-tr.notify
 }
 
 // TryAcquireWithContext acquires the given number of permits from this
