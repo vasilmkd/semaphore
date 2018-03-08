@@ -39,6 +39,9 @@ type Semaphore struct {
 type req struct {
 	n      uint64        // Number of permits requested.
 	notify chan struct{} // Get notified when enough permits are available.
+	// This channel will be closed if the request has already expired and the
+	// semaphore should ignore it.
+	expired chan struct{}
 }
 
 // Request to drain the semaphore.
@@ -102,21 +105,25 @@ func (s *Semaphore) serveAcquire(r req) {
 // Serve a request to release permits.
 func (s *Semaphore) serveRelease(n uint64) {
 	s.permits += n // Permits are released immediately.
-	// Proceed to unblock the next queued requests which can be
-	// fulfilled.
 	for s.queue.Len() > 0 {
+		// Proceed to unblock the next queued requests which can be
+		// fulfilled.
 		h := s.queue.Front() // Get the next queued acquire req.
 		r := h.Value.(req)
 		if s.permits < r.n {
-			// The next req cannot be fulfilled. Must stop here,
-			// otherwise we risk starving requests for many permits
-			// at once.
+			// The next request cannot be fulfilled. We ust stop here, otherwise
+			// we risk starving large requests.
 			break
 		}
-		// Acquire the permits.
-		s.permits -= r.n
+		select {
+		case <-r.expired:
+			// The request is already expired and should not be served.
+		default:
+			// The request is still valid and should be served.
+			s.permits -= r.n // Acquire the permits.
+			close(r.notify)  // Notify the requester.
+		}
 		s.queue.Remove(h) // Remove the req from the queue.
-		close(r.notify)   // Notify the requester.
 	}
 }
 
@@ -151,12 +158,7 @@ func (s *Semaphore) serveAvailable(ar availableReq) {
 // Acquire acquires the given number of permits from this semaphore, blocking
 // the current goroutine until all are available.
 func (s *Semaphore) Acquire(n uint64) {
-	r := req{
-		n:      n,
-		notify: make(chan struct{}),
-	}
-	s.acq <- r
-	<-r.notify
+	s.TryAcquireWithContext(context.Background(), n)
 }
 
 // AvailablePermits returns the current number of permits available in this
@@ -201,24 +203,20 @@ func (s *Semaphore) TryAcquire(n uint64) error {
 // representing success. Otherwise, the number of available permits stays
 // unchanged and an error is returned.
 func (s *Semaphore) TryAcquireWithContext(ctx context.Context, n uint64) error {
-	success := make(chan struct{}, 1)
-	signal := make(chan bool, 1)
-
-	go func() {
-		s.Acquire(n)
-		success <- struct{}{}
-		if <-signal {
-			s.Release(n)
-		}
-	}()
-
+	r := req{
+		n:       n,
+		notify:  make(chan struct{}),
+		expired: make(chan struct{}),
+	}
+	s.acq <- r
 	select {
-	case <-success:
-		signal <- false
-		return nil
 	case <-ctx.Done():
-		signal <- true
+		// The context has timed out or was canceled. The request should be
+		// invalidated.
+		close(r.expired)
 		return ctx.Err()
+	case <-r.notify:
+		return nil // The request has been successfully served.
 	}
 }
 
