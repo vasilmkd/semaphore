@@ -65,6 +65,8 @@ func New(permits uint64) *Semaphore {
 	return s
 }
 
+// Serves the different types of requests that can be sent to the semaphore. It
+// is designed to be invoked as a separate goroutine.
 func (s *Semaphore) serve() {
 	for {
 		select {
@@ -82,17 +84,18 @@ func (s *Semaphore) serve() {
 	}
 }
 
+// Serve a request to acquire permits.
 func (s *Semaphore) serveAcquire(r req) {
 	if s.permits >= r.n && s.queue.Len() == 0 {
-		// Acquire can be immediately served.
-		s.permits -= r.n
-		close(r.notify)
+		s.permits -= r.n // Acquire can be immediately served.
+		close(r.notify)  // There is no need to queue the request.
 	} else {
 		// Acquire is blocked and queued, not enough available permits.
 		s.queue.PushBack(r)
 	}
 }
 
+// Serve a request to release permits.
 func (s *Semaphore) serveRelease(n uint64) {
 	s.permits += n // Permits are released immediately.
 	// Proceed to unblock the next queued requests which can be
@@ -113,15 +116,20 @@ func (s *Semaphore) serveRelease(n uint64) {
 	}
 }
 
+// Serve a request to drain the semaphore.
 func (s *Semaphore) serveDrain(dr drainReq) {
+	// All of the available permits are acquired by the requester.
 	dr.notify <- s.permits
-	s.permits = 0
-	close(dr.notify)
+	s.permits = 0    // No more permits are left in the semaphore.
+	close(dr.notify) // No more communication over the channel.
 }
 
+// Serve a TryAcquire request.
 func (s *Semaphore) serveTry(tr tryReq) {
 	if s.permits >= tr.n && s.queue.Len() == 0 {
-		// Successful TryAcquire.
+		// The semaphore can be acquired without blocking. This can happen if
+		// the semaphore has enough available permits and there are no other
+		// blocked requests.
 		s.permits -= tr.n
 		tr.notify <- nil
 	} else {
@@ -130,6 +138,7 @@ func (s *Semaphore) serveTry(tr tryReq) {
 	close(tr.notify)
 }
 
+// Serve a query for the available permits in the semaphore.
 func (s *Semaphore) serveAvailable(ar drainReq) {
 	ar.notify <- s.permits
 }
